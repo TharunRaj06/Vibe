@@ -2,27 +2,25 @@ const { CosmosClient } = require('@azure/cosmos');
 
 class AzureCosmosDB {
   constructor() {
-    this.endpoint = process.env.AZURE_COSMOS_DB_ENDPOINT;
-    this.key = process.env.AZURE_COSMOS_DB_KEY;
-    this.databaseId = process.env.AZURE_COSMOS_DB_DATABASE_ID || 'AutoClaimAI';
-    
-    if (!this.endpoint || !this.key) {
-      console.warn('Azure Cosmos DB credentials not found. Using MongoDB fallback.');
-      this.enabled = false;
-      return;
-    }
-    
-    this.client = new CosmosClient({ 
-      endpoint: this.endpoint, 
-      key: this.key 
-    });
-    
-    this.enabled = true;
-    this.initializeDatabase();
+    this.endpoint = process.env.COSMOS_DB_ENDPOINT;
+    this.key = process.env.COSMOS_DB_KEY;
+    this.databaseId = process.env.COSMOS_DB_DATABASE_ID || 'autoclaimai';
+    this.enabled = false;
+    this.client = null;
+    this.database = null;
   }
 
-  async initializeDatabase() {
+  async initializeCosmosDB() {
     try {
+      if (!this.endpoint || !this.key) {
+        throw new Error('Azure Cosmos DB credentials not found. Please set COSMOS_DB_ENDPOINT and COSMOS_DB_KEY environment variables.');
+      }
+      
+      this.client = new CosmosClient({ 
+        endpoint: this.endpoint, 
+        key: this.key 
+      });
+      
       // Create database if it doesn't exist
       const { database } = await this.client.databases.createIfNotExists({
         id: this.databaseId
@@ -33,10 +31,12 @@ class AzureCosmosDB {
       // Create containers (collections) if they don't exist
       await this.createContainers();
       
-      console.log('Azure Cosmos DB initialized successfully');
+      this.enabled = true;
+      console.log(`Azure Cosmos DB initialized successfully with database: ${this.databaseId}`);
     } catch (error) {
-      console.error('Error initializing Azure Cosmos DB:', error);
+      console.error('Error initializing Azure Cosmos DB:', error.message);
       this.enabled = false;
+      throw error;
     }
   }
 
@@ -44,7 +44,7 @@ class AzureCosmosDB {
     const containers = [
       {
         id: 'users',
-        partitionKey: '/azureId'
+        partitionKey: '/userId'
       },
       {
         id: 'claims',

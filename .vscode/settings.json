@@ -1,0 +1,8 @@
+{
+    "appService.zipIgnorePattern": [
+        "node_modules{,/**}",
+        ".vscode{,/**}"
+    ],
+    "appService.defaultWebAppToDeploy": "/subscriptions/ad0bfcf8-24f9-44ed-a45a-6aaa77e6aca4/resourceGroups/AutoClaimAI-RG/providers/Microsoft.Web/sites/autoclaims",
+    "appService.deploySubpath": "."
+}

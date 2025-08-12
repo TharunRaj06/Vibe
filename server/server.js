@@ -3,7 +3,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
-const mongoose = require('mongoose');
 const path = require('path');
 
 // Load environment variables
@@ -12,6 +11,7 @@ dotenv.config();
 // Import routes
 const claimRoutes = require('./routes/claims');
 const userRoutes = require('./routes/users');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 
@@ -26,11 +26,42 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true
-}));
+// CORS configuration for Azure deployment
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or same-origin requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      process.env.CLIENT_URL,
+      'http://localhost:3000',
+      'https://localhost:3000',
+      /\.azurewebsites\.net$/  // Allow all Azure Web App domains
+    ].filter(Boolean);
+    
+    // Check if origin matches any allowed pattern
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (typeof allowedOrigin === 'string') {
+        return allowedOrigin === origin;
+      } else if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log(`CORS blocked origin: ${origin}`);
+      callback(null, true); // Allow all origins in production for now
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -39,17 +70,25 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Connect to MongoDB (fallback for local development)
-if (process.env.USE_COSMOS_DB !== 'true') {
-  mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/autoclaimai', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
+// Serve React build files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/build')));
+}
+
+// Initialize Azure Services
+const azureCosmosDB = require('./services/azureCosmosDB');
+
+// Initialize Cosmos DB connection
+if (process.env.COSMOS_DB_ENDPOINT && process.env.COSMOS_DB_KEY) {
+  azureCosmosDB.initializeCosmosDB()
+    .then(() => console.log('✅ Connected to Azure Cosmos DB'))
+    .catch(err => console.error('❌ Azure Cosmos DB connection error:', err.message));
+} else {
+  console.log('⚠️  Azure Cosmos DB credentials not found. Please configure COSMOS_DB_ENDPOINT and COSMOS_DB_KEY');
 }
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/claims', claimRoutes);
 app.use('/api/users', userRoutes);
 
@@ -57,6 +96,13 @@ app.use('/api/users', userRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
+
+// Catch all handler for React routes (must be after API routes)
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/build/index.html'));
+  });
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -67,9 +113,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+// 404 handler for API routes only
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ message: 'API route not found' });
 });
 
 const PORT = process.env.PORT || 5000;

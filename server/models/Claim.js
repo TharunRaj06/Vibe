@@ -1,120 +1,216 @@
-const mongoose = require('mongoose');
+// Azure Cosmos DB Claim Model
+// This model represents claim data structure for Azure Cosmos DB
 
-const claimSchema = new mongoose.Schema({
-  claimNumber: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  vehicleInfo: {
-    make: { type: String, required: true },
-    model: { type: String, required: true },
-    year: { type: Number, required: true },
-    licensePlate: { type: String, required: true },
-    vin: String,
-    color: String
-  },
-  incidentDetails: {
-    dateOfIncident: { type: Date, required: true },
-    timeOfIncident: String,
-    location: {
-      address: String,
-      city: String,
-      state: String,
-      zipCode: String,
-      coordinates: {
-        latitude: Number,
-        longitude: Number
+class Claim {
+  constructor(claimData = {}) {
+    this.id = claimData.id || this.generateId();
+    this.claimNumber = claimData.claimNumber || this.generateClaimNumber();
+    this.userId = claimData.userId; // Azure AD user ID
+    this.azureId = claimData.azureId || claimData.userId; // For compatibility
+    
+    this.vehicleInfo = claimData.vehicleInfo || {
+      make: '',
+      model: '',
+      year: null,
+      licensePlate: '',
+      vin: '',
+      color: ''
+    };
+    
+    this.incidentDetails = claimData.incidentDetails || {
+      dateOfIncident: null,
+      timeOfIncident: '',
+      location: {
+        address: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        coordinates: {
+          lat: null,
+          lng: null
+        }
+      },
+      description: '',
+      weatherConditions: '',
+      roadConditions: '',
+      trafficConditions: ''
+    };
+    
+    this.damageAssessment = claimData.damageAssessment || {
+      vehicleDamageDescription: '',
+      estimatedRepairCost: 0,
+      photos: [],
+      aiAnalysis: {
+        damageConfidence: 0,
+        damageSeverity: 'unknown',
+        detectedDamageTypes: [],
+        estimatedCost: 0,
+        analysisDate: null
       }
-    },
-    description: { type: String, required: true },
-    weather: String,
-    policeReportNumber: String
-  },
-  damageAssessment: {
-    severity: {
-      type: String,
-      enum: ['minor', 'moderate', 'severe', 'pending'],
-      default: 'pending'
-    },
-    aiAnalysis: {
-      confidence: Number,
-      detectedDamage: [String],
-      estimatedCost: Number,
-      analysisDate: Date
-    },
-    humanReview: {
-      reviewed: { type: Boolean, default: false },
-      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      reviewDate: Date,
-      notes: String
-    }
-  },
-  images: [{
-    originalName: String,
-    filename: String,
-    azureBlobUrl: String,
-    size: Number,
-    uploadDate: { type: Date, default: Date.now },
-    analysisResults: {
-      damageDetected: Boolean,
-      damageType: [String],
-      confidence: Number
-    }
-  }],
-  status: {
-    type: String,
-    enum: ['submitted', 'under_review', 'pending_documents', 'approved', 'rejected', 'closed'],
-    default: 'submitted'
-  },
-  estimatedAmount: {
-    type: Number,
-    default: 0
-  },
-  approvedAmount: Number,
-  rejectionReason: String,
-  adminNotes: String,
-  communications: [{
-    type: { type: String, enum: ['email', 'sms', 'internal'] },
-    subject: String,
-    message: String,
-    sentAt: { type: Date, default: Date.now },
-    sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    recipient: String
-  }],
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  },
-  closedAt: Date
-});
-
-claimSchema.pre('save', function(next) {
-  this.updatedAt = Date.now();
-  
-  // Auto-generate claim number if not provided
-  if (!this.claimNumber && this.isNew) {
-    const timestamp = Date.now().toString();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    this.claimNumber = `CLM-${timestamp.slice(-6)}-${random}`;
+    };
+    
+    this.documentation = claimData.documentation || {
+      photos: [],
+      videos: [],
+      documents: [],
+      policeReportNumber: '',
+      witnessInfo: []
+    };
+    
+    this.status = claimData.status || 'draft';
+    this.priority = claimData.priority || 'medium';
+    this.assignedTo = claimData.assignedTo || null;
+    
+    this.financialInfo = claimData.financialInfo || {
+      estimatedAmount: 0,
+      approvedAmount: 0,
+      deductible: 0,
+      paymentStatus: 'pending'
+    };
+    
+    this.timeline = claimData.timeline || [];
+    this.notes = claimData.notes || [];
+    
+    this.createdAt = claimData.createdAt || new Date().toISOString();
+    this.updatedAt = claimData.updatedAt || new Date().toISOString();
+    this.submittedAt = claimData.submittedAt || null;
+    this.processedAt = claimData.processedAt || null;
+    this.completedAt = claimData.completedAt || null;
   }
-  
-  next();
-});
 
-// Index for better query performance
-claimSchema.index({ userId: 1 });
-claimSchema.index({ status: 1 });
-claimSchema.index({ claimNumber: 1 });
-claimSchema.index({ createdAt: -1 });
+  generateId() {
+    return 'claim_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
 
-module.exports = mongoose.model('Claim', claimSchema);
+  generateClaimNumber() {
+    const prefix = 'CLM';
+    const timestamp = Date.now().toString().slice(-8);
+    const random = Math.random().toString(36).substr(2, 4).toUpperCase();
+    return `${prefix}-${timestamp}-${random}`;
+  }
+
+  // Convert to Cosmos DB document format
+  toCosmosDocument() {
+    return {
+      id: this.id,
+      claimNumber: this.claimNumber,
+      userId: this.userId,
+      azureId: this.azureId,
+      vehicleInfo: this.vehicleInfo,
+      incidentDetails: this.incidentDetails,
+      damageAssessment: this.damageAssessment,
+      documentation: this.documentation,
+      status: this.status,
+      priority: this.priority,
+      assignedTo: this.assignedTo,
+      financialInfo: this.financialInfo,
+      timeline: this.timeline,
+      notes: this.notes,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      submittedAt: this.submittedAt,
+      processedAt: this.processedAt,
+      completedAt: this.completedAt
+    };
+  }
+
+  // Validation method
+  validate() {
+    const errors = [];
+    
+    if (!this.userId) errors.push('User ID is required');
+    if (!this.vehicleInfo.make) errors.push('Vehicle make is required');
+    if (!this.vehicleInfo.model) errors.push('Vehicle model is required');
+    if (!this.vehicleInfo.year) errors.push('Vehicle year is required');
+    if (!this.vehicleInfo.licensePlate) errors.push('License plate is required');
+    if (!this.incidentDetails.dateOfIncident) errors.push('Incident date is required');
+    
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+
+  // Update claim data
+  update(updateData) {
+    Object.keys(updateData).forEach(key => {
+      if (key !== 'id' && key !== 'claimNumber' && key !== 'createdAt' && updateData[key] !== undefined) {
+        this[key] = updateData[key];
+      }
+    });
+    this.updatedAt = new Date().toISOString();
+  }
+
+  // Add timeline entry
+  addTimelineEntry(entry) {
+    this.timeline.push({
+      id: 'timeline_' + Date.now(),
+      timestamp: new Date().toISOString(),
+      action: entry.action,
+      description: entry.description,
+      user: entry.user,
+      details: entry.details || {}
+    });
+    this.updatedAt = new Date().toISOString();
+  }
+
+  // Add note
+  addNote(note) {
+    this.notes.push({
+      id: 'note_' + Date.now(),
+      timestamp: new Date().toISOString(),
+      author: note.author,
+      content: note.content,
+      type: note.type || 'general'
+    });
+    this.updatedAt = new Date().toISOString();
+  }
+
+  // Update status
+  updateStatus(newStatus, user = null) {
+    const oldStatus = this.status;
+    this.status = newStatus;
+    
+    this.addTimelineEntry({
+      action: 'status_change',
+      description: `Status changed from ${oldStatus} to ${newStatus}`,
+      user: user
+    });
+
+    // Set timestamps based on status
+    switch (newStatus) {
+      case 'submitted':
+        this.submittedAt = new Date().toISOString();
+        break;
+      case 'processing':
+        this.processedAt = new Date().toISOString();
+        break;
+      case 'completed':
+      case 'closed':
+        this.completedAt = new Date().toISOString();
+        break;
+    }
+  }
+
+  // Calculate total estimated cost
+  getTotalEstimatedCost() {
+    return this.damageAssessment.estimatedRepairCost + this.financialInfo.deductible;
+  }
+
+  // Get status display
+  getStatusDisplay() {
+    const statusMap = {
+      'draft': 'Draft',
+      'submitted': 'Submitted',
+      'under_review': 'Under Review',
+      'processing': 'Processing',
+      'approved': 'Approved',
+      'rejected': 'Rejected',
+      'completed': 'Completed',
+      'closed': 'Closed'
+    };
+    return statusMap[this.status] || this.status;
+  }
+}
+
+module.exports = Claim;
